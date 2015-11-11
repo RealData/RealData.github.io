@@ -1,0 +1,283 @@
+---
+title: '##typeof(), class(), mode() and storage.mode() functions '
+output:
+  html_document:
+    highlight: tango
+    theme: united
+---
+
+There are several functions in R language intended to help developer determine data type, class and storage mode of objects, `typeof()`, `class()`, `mode()`, and `storage.mode()`. At the same time, many of R users notice some inconsistency in output of these functions, especially when apply them to primitive data types. 
+
+
+
+#### Vectors 
+To illustrate this let's create a simple integer vector and check the output of the `typeof()`, `class()`, `mode()` and `storage.mode()` functions. We could expect that all four functions should give the same result. Instead, we see that `typeof()` and `class()` functions define `intVector` variable as an integer vector, while `mode()` and `storage.mode()` functions classify it as a numeric one.  
+
+```{r global_options, include=FALSE}
+knitr::opts_chunk$set(collapse=TRUE) 
+options(width=110) 
+```
+
+```{r collapse=TRUE}
+intVector = 1:10  
+typeof(intVector) 
+class(intVector) 
+mode(intVector) 
+storage.mode(intVector) 
+```
+We know that the `mode()` and `storage.mode()` functions are not recommended to use and were introduced for compatibility with S PLUS system. It seems that we can be quite happy as `typeof()` and `class()` work excellent for integer vectors, but the situation become more complicated when we are trying to determine the data type and the class of a real vector: 
+```{r}
+realVector = seq(from=0.1, to=1, by=0.1)  
+typeof(realVector) 
+class(realVector) 
+mode(realVector) 
+storage.mode(realVector) 
+``` 
+Here, only `typeof()` function output is predictable, other functions behave in weird manner. The `class()` function defines the class of a real vector as 'numeric'. Not only is it not clear what the 'numeric' means, but also we see that the class of a real vector is the same as the mode of an integer vector, which is also 'numeric'. Moreover, the modes of integer and real vectors are indistinguishable. Again, we could forget about the `mode()` and `storage.mode()` functions, but the behavior of `class()` is still not quite obvious. The main question here is why the `class()` function returns 'numeric' as a class of a real vector. We can expect that the `class()` function output is based on the `class` attribute of the object, but there is no such attribute attached to `realVector` object: 
+```{r} 
+attributes(realVector)
+
+```
+So, where does the `typeof()` and `class()` functions take the information about data type and class of primitive objects? But before we start looking at the R system source code let's check other primitive data structures by applying `typeof()`, `class()` , `mode()` and `storage.mode()` functions to integer, real, complex, character and logical vectors (atomic) as well as to a list (which is a vector too). Fortunately, we can see that there is no inconsistency for the data types other than integer and real vectors.  
+```{r} 
+complexVector = (10 + 10i) * intVector 
+charVector = 'some string' 
+logVector = rep(c(TRUE, FALSE), 5)  
+simpleList = list(1:10)   
+
+sapply(
+  list(
+    intVector = intVector, 
+    realVector = realVector, 
+    complexVector = complexVector, 
+    charVector = charVector, 
+    logVector = logVector, 
+    simpleList = simpleList
+  ), 
+  function(v) { 
+    c(
+      typeof = typeof(v), 
+      class = class(v), 
+      mode = mode(v), 
+      storage.mode = storage.mode(v) 
+    )
+  }
+)
+```
+
+
+#### Matrices 
+We just saw very strange behavior of the `class()` function when applied to simple vectors. But what about multidimensional data structures, like matrices, arrays and data frames? Matrices and arrays are virtually just vectors with `dim` attribute: 
+```{r}
+intMatrix = matrix(intVector, nrow=5, ncol=2) 
+attributes(intMatrix) 
+``` 
+Let's now apply all four functions to the matrices of different types: 
+```{r} 
+realMatrix = matrix(realVector, nrow=5, ncol=2) 
+complexMatrix = matrix(complexVector, nrow=5, ncol=2) 
+charMatrix = matrix(charVector, nrow=5, ncol=2) 
+logMatrix = matrix(logVector, nrow=5, ncol=2) 
+
+sapply(
+  list(
+    intMatrix = intMatrix, 
+    realMatrix = realMatrix, 
+    complexMatrix = complexMatrix, 
+    charMatrix = charMatrix, 
+    logMatrix = logMatrix      
+  ), 
+  function(v) { 
+    c(
+      typeof = typeof(v), 
+      class = class(v), 
+      mode = mode(v), 
+      storage.mode = storage.mode(v) 
+    )
+  }
+)
+``` 
+We see the same behavior of `typeof()`, `mode()` and `storage.mode()` functions, while the `class()` functions tells us that the matrices belong to the 'matrix' class. In this case, an assignment of matrices to 'matrix' class is logical, in contrast to what we observed for vectors.  The only question there is the same: where does the `class()` function take the information about class of the matrices if there is now `class` attribute attached to matrix objects.
+
+#### Data Frames 
+As for data frames, we do not expect any specific behavior of the functions as the data frame structure is just a list containing atomic vectors of the same length with the `class` attribute equal to 'data.frame'. Let's just check this. 
+```{r} 
+dataFrame = data.frame(intVector, realVector, complexVector, charVector, logVector) 
+attributes(dataFrame) 
+typeof(dataFrame) 
+class(dataFrame) 
+mode(dataFrame) 
+storage.mode(dataFrame) 
+```
+
+#### typeof() source code 
+To clarify the behavior of `typeof()`, `class()` , `mode()`, and `storage.mode()` functions we need to look at R system source code. We start with `typeof()`. In principle, there is no problem with output of this function. Its behavior is logical and consistent, at least for primitive data types. File `src/main/coerce.c` contains the source code of `typeof()` function: 
+```c
+SEXP attribute_hidden do_typeof(SEXP call, SEXP op, SEXP args, SEXP rho) 
+{ 
+    checkArity(op, args); 
+    return type2rstr(TYPEOF(CAR(args))); 
+} 
+``` 
+TYPEOF macros is defined in `src/include/Rinternals.h` 
+```c 
+#define TYPEOF(x)  ((x)->sxpinfo.type) 
+``` 
+as well as `sxpinfo_struct` structures it refers to: 
+```c 
+struct sxpinfo_struct { 
+    SEXPTYPE type      :  TYPE_BITS;
+    unsigned int obj   :  1; 
+    unsigned int named :  2; 
+    unsigned int gp    : 16; 
+    unsigned int mark  :  1; 
+    unsigned int debug :  1; 
+    unsigned int trace :  1;  
+    unsigned int spare :  1;  
+    unsigned int gcgen :  1;  
+    unsigned int gccls :  3;  
+}; 
+``` 
+This means that the type of an object is inferred from the `type` field of the `sxpinfo` structure and transformed to string representation by `type2rstr()` function that is defined in `src/main/util.c` as  
+```c 
+SEXP type2rstr(SEXPTYPE t) /* returns a STRSXP */ 
+{ 
+    if (t < MAX_NUM_SEXPTYPE) { 
+        SEXP res = Type2Table[t].rstrName; 
+      	if (res != NULL) return res; 
+    } 
+    error(_("type %d is unimplemented in '%s'"), t, "type2ImmutableScalarString"); 
+    return R_NilValue; 
+} 
+```
+and takes these string representations of types from `Type2Table` array which in turn is initialized using `InitTypeTables` function with the values from `TypeTable` array located in the same file: 
+```c 
+const static struct { 
+    const char * const str; 
+    const int type; 
+} 
+TypeTable[] = { 
+    { "NULL",  	NILSXP	   },  /* real types */ 
+    { "symbol",		SYMSXP	   }, 
+    { "pairlist",	LISTSXP	   }, 
+    { "closure",	CLOSXP	   }, 
+    { "environment",	ENVSXP	   }, 
+    { "promise",	PROMSXP	   }, 
+    { "language",	LANGSXP	   }, 
+    { "special",	SPECIALSXP }, 
+    { "builtin",	BUILTINSXP }, 
+    { "char",		CHARSXP	   }, 
+    { "logical",	LGLSXP	   }, 
+    { "integer",	INTSXP	   }, 
+    { "double",		REALSXP	   }, /*-  "real", for R <= 0.61.x */ 
+    { "complex",	CPLXSXP	   }, 
+    { "character",	STRSXP	   }, 
+    { "...",		DOTSXP	   }, 
+    { "any",		ANYSXP	   }, 
+    { "expression",	EXPRSXP	   }, 
+    { "list",		VECSXP	   }, 
+    { "externalptr",	EXTPTRSXP  }, 
+    { "bytecode",	BCODESXP   }, 
+    { "weakref",	WEAKREFSXP }, 
+    { "raw",		RAWSXP }, 
+    { "S4",		S4SXP }, 
+    
+    /* aliases : */ 
+    { "numeric",	REALSXP	   }, 
+    { "name",		SYMSXP	   }, 
+ 
+    { (char *)NULL,	-1	   } 
+}; 
+``` 
+
+By this means, the `typeof()` returns the string (i. e. character vector, or STRSXP in the internal C representation) containing the information on data type of the object. The string representations for each of available in R data structures are listed in the above mentioned `TypeTable` array. 
+
+#### `class()` source code 
+The `class()` function is represented by `R_do_data_class` C function (/src/main/attrib.c file) which in turn calls `R_data_class` where the main logic is contained. 
+```c 
+SEXP attribute_hidden R_do_data_class(SEXP call, SEXP op, SEXP args, SEXP env) 
+{ 
+    checkArity(op, args); 
+    if(PRIMVAL(op) == 1) { 
+        check1arg(args, call, "class"); 
+        SEXP klass = CAR(args); 
+        if(TYPEOF(klass) != STRSXP || LENGTH(klass) < 1) 
+            error("invalid class argument to internal .class_cache"); 
+        const char *class = translateChar(STRING_ELT(klass, 0)); 
+        return cache_class(class, CADR(args)); 
+    } 
+    // class(): 
+    check1arg(args, call, "x"); 
+    return R_data_class(CAR(args), FALSE); 
+} 
+
+SEXP R_data_class(SEXP obj, Rboolean singleString) 
+{ 
+    SEXP value, klass = getAttrib(obj, R_ClassSymbol); 
+    int n = length(klass); 
+    if(n == 1 || (n > 0 && !singleString)) 
+        return(klass); 
+    if(n == 0) { 
+      	SEXP dim = getAttrib(obj, R_DimSymbol); 
+       	int nd = length(dim); 
+       	if(nd > 0) { 
+       	    if(nd == 2) 
+         		klass = mkChar("matrix"); 
+   	    else 
+         		klass = mkChar("array"); 
+   	} 
+   	else { 
+    	  SEXPTYPE t = TYPEOF(obj); 
+     	  switch(t) { 
+       	  case CLOSXP: case SPECIALSXP: case BUILTINSXP: 
+       	    klass = mkChar("function"); 
+       	    break; 
+       	  case REALSXP: 
+       	    klass = mkChar("numeric"); 
+       	    break; 
+       	  case SYMSXP: 
+       	    klass = mkChar("name"); 
+       	    break; 
+          case LANGSXP: 
+       	    klass = lang2str(obj, t); 
+       	    break; 
+          default: 
+       	    klass = type2str(t); 
+     	    } 
+   	    } 
+    } 
+    else 
+       	klass = asChar(klass); 
+    PROTECT(klass); 
+    value = ScalarString(klass); 
+    UNPROTECT(1); 
+    return value; 
+} 
+
+``` 
+It becomes clear from this code that the `class()` function returns value of the 'class' attribute of the object if this attribute exists. Otherwise, if there is no 'dim' attribute attached to the object, the function returns string 'numeric' for real vectors, while for other primitive vectors it returns type of the object, that is 'integer', 'complex', character',  'logical' or 'list'. The function returns 'matrix' or 'array' if there is the 'dim' attribute attached to the object and its length is equal to 2 or differs from 2, respectively. The interesting observation here is that the `class()` function returns 'array' both in case if length of the 'dim' attribute is equal to 1 or larger than 2.  
+ 
+#### `mode()` and `storage.mode` source code 
+Functions `mode()` and `storage.mode` are contained in /src/library/base/R/mode.R file. Their behavior is absolutely clear from the source code.  
+```R 
+mode <- function(x) { 
+    if(is.expression(x)) return("expression") 
+    if(is.call(x)) 
+        return(switch(deparse(x[[1L]])[1L], 
+  		      "(" = "(", 
+   		      "call")) 
+    if(is.name(x)) "name" else 
+    switch(tx <- typeof(x), 
+    	  double =, integer = "numeric", 
+    	  closure =, builtin =, special = "function", 
+  	    tx) 
+} 
+
+``` 
+
+```R 
+storage.mode <- function(x) 
+    switch(tx <- typeof(x), 
+        closure = , builtin = , special = "function", 
+        tx) 
+```
